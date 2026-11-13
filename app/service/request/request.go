@@ -27,6 +27,11 @@ type OnJobComplete struct {
 	EndTime         time.Time
 	ExitCode        int
 	Output          string
+	MainExitCode    *int
+	BeforeExitCode  *int
+	BeforeOutput    string
+	AfterExitCode   *int
+	AfterOutput     string
 	Err             error
 }
 
@@ -39,4 +44,9 @@ type RecordExecution struct {
 	ExitCode        int
 	ExecutedCommand string
 	Output          string
+	MainExitCode    *int
+	BeforeExitCode  *int
+	BeforeOutput    string
+	AfterExitCode   *int
+	AfterOutput     string
 }

@@ -104,6 +104,11 @@ type JobEvent struct {
 	EventType       enums.EventType
 	ExitCode        int
 	Output          string
+	MainExitCode    *int
+	BeforeExitCode  *int
+	BeforeOutput    string
+	AfterExitCode   *int
+	AfterOutput     string
 	StartedAt       time.Time
 	FinishedAt      time.Time
 	LiveOutput      func() string // started events only; nil when output capture is disabled

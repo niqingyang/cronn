@@ -109,10 +109,29 @@
         {{template "wrap-toggle"}}
     </div>
     <div class="out-cmd"><b>{{.CommandLabel}}:</b> {{.Command}}</div>
+    {{if or .Run.MainExitCode .Run.BeforeExitCode .Run.AfterExitCode}}
+    {{if .Run.BeforeExitCode}}
+    <div class="out-cmd"><b>Before · exit {{deref .Run.BeforeExitCode}}</b></div>
+    {{if .Run.BeforeOutput}}<pre>{{.Run.BeforeOutput}}</pre>{{else}}<div class="empty-out">No output captured.</div>{{end}}
+    {{end}}
+    {{if .Run.MainExitCode}}
+    <div class="out-cmd"><b>Command · exit {{deref .Run.MainExitCode}}</b></div>
+    {{if .Run.Output}}<pre>{{.Run.Output}}</pre>{{else}}<div class="empty-out">No output captured.</div>{{end}}
+    {{else if and .Run.BeforeExitCode (ne (deref .Run.BeforeExitCode) 0)}}
+    <div class="out-cmd"><b>Command · not run</b></div>
+    {{end}}
+    {{if .Run.AfterExitCode}}
+    <div class="out-cmd"><b>After · exit {{deref .Run.AfterExitCode}}</b></div>
+    {{if .Run.AfterOutput}}<pre>{{.Run.AfterOutput}}</pre>{{else}}<div class="empty-out">No output captured.</div>{{end}}
+    {{else if and .Run.BeforeExitCode (ne (deref .Run.BeforeExitCode) 0)}}
+    <div class="out-cmd"><b>After · not run</b></div>
+    {{end}}
+    {{else}}
     {{if .Run.Output}}
     <pre>{{.Run.Output}}</pre>
     {{else}}
     <div class="empty-out">No output captured.{{if ne .Run.ExitCode 0}} The run failed with exit code {{.Run.ExitCode}}.{{end}}</div>
+    {{end}}
     {{end}}
 </div>
 {{end}}

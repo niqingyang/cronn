@@ -287,11 +287,14 @@ func TestHandleAPIExecutionLogs(t *testing.T) {
 	jobID := HashCommand("echo test1")
 	startTime := time.Now().Add(-1 * time.Minute)
 	endTime := time.Now()
+	mainExit, beforeExit, afterExit := 0, 0, 0
 
 	server.OnJobStart(request.OnJobStart{Command: "echo test1", ExecutedCommand: "echo test1", Schedule: "* * * * *", StartTime: startTime})
 	server.OnJobComplete(request.OnJobComplete{
 		Command: "echo test1", ExecutedCommand: "echo test1 expanded", Schedule: "* * * * *",
 		StartTime: startTime, EndTime: endTime, ExitCode: 0, Output: "test output line 1\ntest output line 2", Err: nil,
+		MainExitCode: &mainExit, BeforeExitCode: &beforeExit, BeforeOutput: "before output",
+		AfterExitCode: &afterExit, AfterOutput: "after output",
 	})
 
 	// wait for event processing
@@ -328,6 +331,14 @@ func TestHandleAPIExecutionLogs(t *testing.T) {
 		assert.Equal(t, 0, apiResp.ExitCode)
 		assert.Equal(t, "echo test1 expanded", apiResp.ExecutedCommand)
 		assert.Equal(t, "test output line 1\ntest output line 2", apiResp.Output)
+		require.NotNil(t, apiResp.MainExitCode)
+		require.NotNil(t, apiResp.BeforeExitCode)
+		require.NotNil(t, apiResp.AfterExitCode)
+		assert.Equal(t, 0, *apiResp.MainExitCode)
+		assert.Equal(t, 0, *apiResp.BeforeExitCode)
+		assert.Equal(t, 0, *apiResp.AfterExitCode)
+		assert.Equal(t, "before output", apiResp.BeforeOutput)
+		assert.Equal(t, "after output", apiResp.AfterOutput)
 		assert.False(t, apiResp.StartedAt.IsZero())
 		assert.False(t, apiResp.FinishedAt.IsZero())
 	})

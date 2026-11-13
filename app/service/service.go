@@ -12,6 +12,7 @@ import (
 	"os"
 	"os/exec"
 	"reflect"
+	"strings"
 	"time"
 
 	log "github.com/go-pkgz/lgr"
@@ -208,9 +209,18 @@ func (s *Scheduler) runJobWithCommand(ctx context.Context, r crontab.JobSpec, co
 	}
 
 	// parse the command through template
-	cmd, err := NewDayTemplate(templateTime, AltTemplateFormat(s.AltTemplate), EndOfDay(s.EODHour)).Parse(commandToParse)
+	template := NewDayTemplate(templateTime, AltTemplateFormat(s.AltTemplate), EndOfDay(s.EODHour))
+	cmd, err := template.Parse(commandToParse)
 	if err != nil {
 		return err
+	}
+	beforeCmd, err := template.Parse(r.Before)
+	if err != nil {
+		return fmt.Errorf("failed to parse before hook: %w", err)
+	}
+	afterCmd, err := template.Parse(r.After)
+	if err != nil {
+		return fmt.Errorf("failed to parse after hook: %w", err)
 	}
 
 	dedupKey := cmd + "#" + r.Spec // dedup by command and spec
@@ -220,7 +230,7 @@ func (s *Scheduler) runJobWithCommand(ctx context.Context, r crontab.JobSpec, co
 	}
 	defer s.DeDup.Remove(dedupKey)
 
-	rfile, rerr := s.Resumer.OnStart(cmd) // register job in resumer prior to execution
+	rfile, rerr := s.Resumer.OnStart(resumeCommand(beforeCmd, cmd, afterCmd)) // register the complete run for resume
 	if rerr != nil {
 		return fmt.Errorf("failed to initiate resumer for %+v: %w", cmd, rerr)
 	}
@@ -247,23 +257,83 @@ func (s *Scheduler) runJobWithCommand(ctx context.Context, r crontab.JobSpec, co
 		s.JobEventHandler.OnJobStart(start)
 	}
 
-	notifyOutput, err := s.executeCommand(ctx, cmd, s.Stdout, rptr, webCapture)
+	var notifyOutput string
+	var mainExitCode, beforeExitCode, afterExitCode *int
+	var beforeOutput, mainOutput, afterOutput string
+	if beforeCmd == "" && afterCmd == "" {
+		notifyOutput, err = s.executeCommand(ctx, cmd, s.Stdout, rptr, webCapture)
+	} else {
+		runStep := func(stepCtx context.Context, command string, stepRepeater Repeater) (string, string, error) {
+			stepCapture := s.newWebCapture()
+			writers := make([]io.Writer, 0, 2)
+			if s.Stdout != nil {
+				writers = append(writers, s.Stdout)
+			}
+			if webCapture != nil {
+				writers = append(writers, webCapture)
+			}
+			var logWriter io.Writer = io.Discard
+			if len(writers) == 1 {
+				logWriter = writers[0]
+			} else if len(writers) > 1 {
+				logWriter = io.MultiWriter(writers...)
+			}
+			stepNotify, stepErr := s.executeCommand(stepCtx, command, logWriter, stepRepeater, stepCapture)
+			stepOutput := ""
+			if stepCapture != nil {
+				stepOutput = stepCapture.GetOutput()
+			}
+			return stepNotify, stepOutput, stepErr
+		}
+
+		var notifyParts []string
+		var beforeErr, mainErr, afterErr error
+		if beforeCmd != "" {
+			stepNotify, stepOutput, stepErr := runStep(ctx, beforeCmd, repeater.New(&strategy.Once{}))
+			beforeOutput, beforeErr = stepOutput, stepErr
+			beforeExitCode = intPointer(commandExitCode(stepErr))
+			if stepNotify != "" {
+				notifyParts = append(notifyParts, "[before]\n"+stepNotify)
+			}
+		}
+
+		if beforeErr == nil {
+			stepNotify, stepOutput, stepErr := runStep(ctx, cmd, rptr)
+			mainOutput, mainErr = stepOutput, stepErr
+			mainExitCode = intPointer(commandExitCode(stepErr))
+			if stepNotify != "" {
+				notifyParts = append(notifyParts, "[command]\n"+stepNotify)
+			}
+			if afterCmd != "" {
+				stepNotify, stepOutput, stepErr = runStep(context.WithoutCancel(ctx), afterCmd, repeater.New(&strategy.Once{}))
+				afterOutput, afterErr = stepOutput, stepErr
+				afterExitCode = intPointer(commandExitCode(stepErr))
+				if stepNotify != "" {
+					notifyParts = append(notifyParts, "[after]\n"+stepNotify)
+				}
+			}
+			err = mainErr
+			if err == nil {
+				err = afterErr
+			}
+		} else {
+			err = beforeErr
+		}
+		notifyOutput = strings.Join(notifyParts, "\n\n")
+	}
 	webOutput := ""
 	if webCapture != nil {
 		webOutput = webCapture.GetOutput()
+	}
+	executionOutput := webOutput
+	if beforeCmd != "" || afterCmd != "" {
+		executionOutput = mainOutput
 	}
 
 	// notify job complete
 	endTime := time.Now()
 	if s.JobEventHandler != nil {
-		exitCode := 0
-		if err != nil {
-			if exitError, ok := errors.AsType[*exec.ExitError](err); ok {
-				exitCode = exitError.ExitCode()
-			} else {
-				exitCode = 1 // generic error for non-exec errors
-			}
-		}
+		exitCode := commandExitCode(err)
 		s.JobEventHandler.OnJobComplete(request.OnJobComplete{
 			Command:         r.Command,
 			ExecutedCommand: executedCommand,
@@ -271,7 +341,12 @@ func (s *Scheduler) runJobWithCommand(ctx context.Context, r crontab.JobSpec, co
 			StartTime:       startTime,
 			EndTime:         endTime,
 			ExitCode:        exitCode,
-			Output:          webOutput, // use web-specific output
+			Output:          executionOutput,
+			MainExitCode:    mainExitCode,
+			BeforeExitCode:  beforeExitCode,
+			BeforeOutput:    beforeOutput,
+			AfterExitCode:   afterExitCode,
+			AfterOutput:     afterOutput,
 			Err:             err,
 		})
 	}
@@ -444,7 +519,8 @@ func (s *Scheduler) loadFromFileParser(ctx context.Context) error {
 	}
 
 	for _, js := range jss {
-		req := crontab.JobSpec{Spec: js.Spec, Command: js.Command, Name: js.Name, Repeater: js.Repeater, Conditions: js.Conditions}
+		req := crontab.JobSpec{Spec: js.Spec, Command: js.Command, Before: js.Before, After: js.After,
+			Name: js.Name, Repeater: js.Repeater, Conditions: js.Conditions}
 		if err = s.schedule(ctx, req); err != nil {
 			return fmt.Errorf("can't add %s, %s: %w", js.Spec, js.Command, err)
 		}
@@ -518,6 +594,8 @@ func (s *Scheduler) listenForManualTriggers(ctx context.Context) {
 			jobSpec := crontab.JobSpec{
 				Spec:     originalJob.Spec,    // use original schedule
 				Command:  originalJob.Command, // use original command for identity
+				Before:   originalJob.Before,
+				After:    originalJob.After,
 				Name:     originalJob.Name,
 				Repeater: originalJob.Repeater, // preserve retry logic
 			}
@@ -550,6 +628,42 @@ func (s *Scheduler) listenForManualTriggers(ctx context.Context) {
 func (s *Scheduler) jobIDFromCommand(cmd string) string {
 	h := sha256.Sum256([]byte(cmd))
 	return hex.EncodeToString(h[:])
+}
+
+func intPointer(value int) *int {
+	return &value
+}
+
+func commandExitCode(err error) int {
+	if err == nil {
+		return 0
+	}
+	if exitError, ok := errors.AsType[*exec.ExitError](err); ok {
+		return exitError.ExitCode()
+	}
+	return 1
+}
+
+func resumeCommand(before, command, after string) string {
+	if before == "" && after == "" {
+		return command
+	}
+	var script strings.Builder
+	if before != "" {
+		fmt.Fprintf(&script, "sh -c %s || exit $?\n", shellQuote(before))
+	}
+	fmt.Fprintf(&script, "sh -c %s\nmain_rc=$?\n", shellQuote(command))
+	if after != "" {
+		fmt.Fprintf(&script, "sh -c %s\nafter_rc=$?\n", shellQuote(after))
+	} else {
+		script.WriteString("after_rc=0\n")
+	}
+	script.WriteString("if [ \"$main_rc\" -ne 0 ]; then exit \"$main_rc\"; fi\nexit \"$after_rc\"")
+	return script.String()
+}
+
+func shellQuote(value string) string {
+	return "'" + strings.ReplaceAll(value, "'", "'\"'\"'") + "'"
 }
 
 func (s *Scheduler) resumeInterrupted(concur int) {

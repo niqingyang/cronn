@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"os/exec"
 	"strconv"
 	"strings"
 	"sync"
@@ -498,6 +499,92 @@ func TestScheduler_runJobWithCommandLiveOutput(t *testing.T) {
 		assert.Nil(t, handler.OnJobStartCalls()[0].Req.LiveOutput)
 		assert.Empty(t, handler.OnJobCompleteCalls()[0].Req.Output)
 	})
+}
+
+func TestScheduler_runJobWithHooks(t *testing.T) {
+	run := func(spec crontab.JobSpec, command string) (request.OnJobComplete, error) {
+		var completed request.OnJobComplete
+		handler := &mocks.JobEventHandlerMock{
+			OnJobStartFunc: func(request.OnJobStart) {},
+			OnJobCompleteFunc: func(req request.OnJobComplete) {
+				completed = req
+			},
+		}
+		svc := Scheduler{
+			Stdout:            bytes.NewBuffer(nil),
+			Resumer:           &mocks.ResumerMock{OnStartFunc: func(string) (string, error) { return "", nil }, OnFinishFunc: func(string) error { return nil }},
+			DeDup:             NewDeDup(false),
+			JobEventHandler:   handler,
+			NotifyTimeout:     time.Second,
+			ExecMaxLogLines:   20,
+			NotifyMaxLogLines: 20,
+		}
+		err := svc.runJobWithCommand(context.Background(), spec, command, nil, repeater.New(&strategy.Once{}), false)
+		return completed, err
+	}
+
+	t.Run("runs all steps and captures each result", func(t *testing.T) {
+		result, err := run(crontab.JobSpec{Spec: "* * * * *", Command: "echo main", Before: "echo before", After: "echo after"}, "echo main")
+		require.NoError(t, err)
+		require.NotNil(t, result.BeforeExitCode)
+		require.NotNil(t, result.MainExitCode)
+		require.NotNil(t, result.AfterExitCode)
+		assert.Equal(t, 0, *result.BeforeExitCode)
+		assert.Equal(t, 0, *result.MainExitCode)
+		assert.Equal(t, 0, *result.AfterExitCode)
+		assert.Equal(t, "before", result.BeforeOutput)
+		assert.Equal(t, "main", result.Output)
+		assert.Equal(t, "after", result.AfterOutput)
+		assert.Equal(t, 0, result.ExitCode)
+	})
+
+	t.Run("runs after when the main command fails", func(t *testing.T) {
+		result, err := run(crontab.JobSpec{Spec: "* * * * *", Command: "exit 4", After: "echo cleanup"}, "echo main; exit 4")
+		require.Error(t, err)
+		require.NotNil(t, result.MainExitCode)
+		require.NotNil(t, result.AfterExitCode)
+		assert.Equal(t, 4, *result.MainExitCode)
+		assert.Equal(t, 0, *result.AfterExitCode)
+		assert.Equal(t, "cleanup", result.AfterOutput)
+		assert.Equal(t, 4, result.ExitCode)
+	})
+
+	t.Run("after failure is the overall failure when main succeeds", func(t *testing.T) {
+		result, err := run(crontab.JobSpec{Spec: "* * * * *", Command: "echo main", After: "echo cleanup; exit 6"}, "echo main")
+		require.Error(t, err)
+		require.NotNil(t, result.MainExitCode)
+		require.NotNil(t, result.AfterExitCode)
+		assert.Equal(t, 0, *result.MainExitCode)
+		assert.Equal(t, 6, *result.AfterExitCode)
+		assert.Equal(t, 6, result.ExitCode)
+	})
+
+	t.Run("before failure skips command and after", func(t *testing.T) {
+		result, err := run(crontab.JobSpec{Spec: "* * * * *", Command: "echo skipped", Before: "echo setup; exit 7", After: "echo skipped"}, "echo skipped")
+		require.Error(t, err)
+		require.NotNil(t, result.BeforeExitCode)
+		assert.Nil(t, result.MainExitCode)
+		assert.Nil(t, result.AfterExitCode)
+		assert.Equal(t, 7, *result.BeforeExitCode)
+		assert.Equal(t, 7, result.ExitCode)
+		assert.Equal(t, "setup", result.BeforeOutput)
+	})
+}
+
+func TestResumeCommandRunsHookSequence(t *testing.T) {
+	cmd := resumeCommand("echo 'before'; exit 0", "echo 'main'; exit 5", "echo 'after'")
+	output, err := exec.Command("sh", "-c", cmd).CombinedOutput()
+	require.Error(t, err)
+	assert.Contains(t, string(output), "before")
+	assert.Contains(t, string(output), "main")
+	assert.Contains(t, string(output), "after")
+	assert.Contains(t, err.Error(), "exit status 5")
+
+	cmd = resumeCommand("echo before; exit 7", "echo main", "echo after")
+	output, err = exec.Command("sh", "-c", cmd).CombinedOutput()
+	require.Error(t, err)
+	assert.Equal(t, "before\n", string(output))
+	assert.Contains(t, err.Error(), "exit status 7")
 }
 
 func TestScheduler_jobFunc(t *testing.T) {

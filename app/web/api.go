@@ -49,6 +49,9 @@ type APIExecution struct {
 	Status          string    `json:"status"`
 	ExitCode        int       `json:"exit_code"`
 	ExecutedCommand string    `json:"executed_command,omitempty"`
+	MainExitCode    *int      `json:"main_exit_code,omitempty"`
+	BeforeExitCode  *int      `json:"before_exit_code,omitempty"`
+	AfterExitCode   *int      `json:"after_exit_code,omitempty"`
 }
 
 // APIHistoryResponse is the JSON response for job history
@@ -67,6 +70,11 @@ type APILogsResponse struct {
 	ExitCode        int       `json:"exit_code"`
 	ExecutedCommand string    `json:"executed_command,omitempty"`
 	Output          string    `json:"output"`
+	MainExitCode    *int      `json:"main_exit_code,omitempty"`
+	BeforeExitCode  *int      `json:"before_exit_code,omitempty"`
+	BeforeOutput    string    `json:"before_output,omitempty"`
+	AfterExitCode   *int      `json:"after_exit_code,omitempty"`
+	AfterOutput     string    `json:"after_output,omitempty"`
 }
 
 // toAPIExecution converts persistence.ExecutionInfo to APIExecution
@@ -78,6 +86,9 @@ func toAPIExecution(e persistence.ExecutionInfo) APIExecution {
 		Status:          e.Status.String(),
 		ExitCode:        e.ExitCode,
 		ExecutedCommand: e.ExecutedCommand,
+		MainExitCode:    e.MainExitCode,
+		BeforeExitCode:  e.BeforeExitCode,
+		AfterExitCode:   e.AfterExitCode,
 	}
 }
 
@@ -230,6 +241,11 @@ func (s *Server) handleAPIExecutionLogs(w http.ResponseWriter, r *http.Request) 
 		ExitCode:        execution.ExitCode,
 		ExecutedCommand: execution.ExecutedCommand,
 		Output:          execution.Output,
+		MainExitCode:    execution.MainExitCode,
+		BeforeExitCode:  execution.BeforeExitCode,
+		BeforeOutput:    execution.BeforeOutput,
+		AfterExitCode:   execution.AfterExitCode,
+		AfterOutput:     execution.AfterOutput,
 	}
 
 	s.writeJSON(w, http.StatusOK, resp)

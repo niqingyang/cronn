@@ -24,6 +24,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"regexp"
+	"runtime"
 	"strconv"
 	"strings"
 	"testing"
@@ -35,11 +36,13 @@ import (
 )
 
 const (
-	testDBPath  = "/tmp/cronn-e2e.db"
 	testCrontab = "e2e/testdata/test-crontab.yml"
 )
 
 var (
+	testDBPath  = filepath.Join(os.TempDir(), "cronn-e2e.db")
+	authDBPath  = filepath.Join(os.TempDir(), "cronn-e2e-auth.db")
+	e2eBinary   = filepath.Join(os.TempDir(), "cronn-e2e"+executableSuffix())
 	e2ePort     = envOr("E2E_PORT", "18080")
 	authPort    = envOr("E2E_AUTH_PORT", "18081")
 	baseURL     = "http://localhost:" + e2ePort
@@ -48,7 +51,6 @@ var (
 
 // auth server constants (separate server for auth tests to avoid rate limiting main tests)
 const (
-	authDBPath   = "/tmp/cronn-e2e-auth.db"
 	testPassword = "testpass123"                                                  //nolint:gosec // test password for e2e tests
 	passwordHash = "$2y$10$ZcZnRH/ya6JUmBRGE8qlBupIFUYgvOewRXtpkB8HecWtUnryAHr0S" //nolint:gosec // bcrypt hash of testpass123 for e2e tests
 )
@@ -91,7 +93,7 @@ func TestMain(m *testing.M) {
 
 	// build test binary
 	ctx := context.Background()
-	build := exec.CommandContext(ctx, "go", "build", "-o", "/tmp/cronn-e2e", "./app")
+	build := exec.CommandContext(ctx, "go", "build", "-o", e2eBinary, "./app")
 	build.Dir = ".."
 	build.Stdout = os.Stdout
 	build.Stderr = os.Stderr
@@ -101,7 +103,7 @@ func TestMain(m *testing.M) {
 	}
 
 	// start server with test config (no auth - auth tests use separate server)
-	serverCmd = exec.CommandContext(ctx, "/tmp/cronn-e2e",
+	serverCmd = exec.CommandContext(ctx, e2eBinary,
 		"-f", "../"+testCrontab,
 		"--log.enabled",
 		"--web.enabled",
@@ -166,9 +168,17 @@ func TestMain(m *testing.M) {
 	_ = pw.Stop()
 	_ = serverCmd.Process.Kill()
 	_ = os.Remove(testDBPath)
+	_ = os.Remove(e2eBinary)
 	_ = os.Remove("../" + testCrontab)
 
 	os.Exit(code)
+}
+
+func executableSuffix() string {
+	if runtime.GOOS == "windows" {
+		return ".exe"
+	}
+	return ""
 }
 
 func createTestCrontab() error {
@@ -185,7 +195,9 @@ func createTestCrontab() error {
     command: 'echo "job4: weekdays at 8:30"'
     name: "Weekday report"
   - spec: "0 0 1 1 *"
+    before: "echo preparing"
     command: "sh -c 'echo fetching; echo boom >&2; exit 3'"
+    after: "echo cleanup"
     name: "Vendor feed import"
   - spec: "0 0 1 1 *"
     command: "sh -c 'exit 7'"

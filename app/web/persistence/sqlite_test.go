@@ -169,6 +169,31 @@ func TestSQLiteStore_RecordExecution(t *testing.T) {
 	assert.Equal(t, 0, exitCode)
 }
 
+func TestSQLiteStore_RecordExecutionWithHookResults(t *testing.T) {
+	store, err := NewSQLiteStore(filepath.Join(t.TempDir(), "hooks.db"))
+	require.NoError(t, err)
+	defer store.Close()
+
+	mainExit, beforeExit, afterExit := 4, 0, 0
+	err = store.RecordExecution(request.RecordExecution{
+		JobID: "job-hooks", StartedAt: time.Now().Add(-time.Second), FinishedAt: time.Now(),
+		Status: enums.JobStatusFailed, ExitCode: 4, Output: "main output",
+		MainExitCode: &mainExit, BeforeExitCode: &beforeExit, BeforeOutput: "before output",
+		AfterExitCode: &afterExit, AfterOutput: "after output",
+	})
+	require.NoError(t, err)
+
+	executions, err := store.GetExecutions("job-hooks", 1)
+	require.NoError(t, err)
+	require.Len(t, executions, 1)
+	assert.Equal(t, mainExit, *executions[0].MainExitCode)
+	assert.Equal(t, beforeExit, *executions[0].BeforeExitCode)
+	assert.Equal(t, afterExit, *executions[0].AfterExitCode)
+	assert.Equal(t, "before output", executions[0].BeforeOutput)
+	assert.Equal(t, "main output", executions[0].Output)
+	assert.Equal(t, "after output", executions[0].AfterOutput)
+}
+
 func TestSQLiteStore_RecordExecutionWithEditedCommand(t *testing.T) {
 	tmpDir := t.TempDir()
 	dbPath := filepath.Join(tmpDir, "test.db")

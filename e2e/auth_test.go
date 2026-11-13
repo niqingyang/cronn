@@ -24,7 +24,7 @@ func startAuthServer(t *testing.T) *authServer {
 	t.Helper()
 
 	ctx := context.Background()
-	cmd := exec.CommandContext(ctx, "/tmp/cronn-e2e",
+	cmd := exec.CommandContext(ctx, e2eBinary,
 		"-f", "../"+testCrontab,
 		"--log.enabled",
 		"--web.enabled",

@@ -50,6 +50,14 @@
           "type": "string",
           "description": "Command to execute"
         },
+        "before": {
+          "type": "string",
+          "description": "Command to execute before the job command"
+        },
+        "after": {
+          "type": "string",
+          "description": "Command to execute after the job command"
+        },
         "name": {
           "type": "string",
           "description": "Optional job name or description"

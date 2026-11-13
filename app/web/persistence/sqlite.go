@@ -46,6 +46,11 @@ type ExecutionInfo struct {
 	ExitCode        int             `db:"exit_code"`
 	ExecutedCommand string          `db:"executed_command"`
 	Output          string          `db:"output"`
+	MainExitCode    *int            `db:"main_exit_code"`
+	BeforeExitCode  *int            `db:"before_exit_code"`
+	BeforeOutput    string          `db:"before_output"`
+	AfterExitCode   *int            `db:"after_exit_code"`
+	AfterOutput     string          `db:"after_output"`
 }
 
 // SQLiteStore implements persistence using SQLite
@@ -122,6 +127,11 @@ func (s *SQLiteStore) initialize(ctx context.Context) error {
 			exit_code INTEGER,
 			executed_command TEXT,
 			output TEXT,
+			main_exit_code INTEGER,
+			before_exit_code INTEGER,
+			before_output TEXT DEFAULT '',
+			after_exit_code INTEGER,
+			after_output TEXT DEFAULT '',
 			FOREIGN KEY (job_id) REFERENCES jobs(id)
 		)`,
 		`CREATE INDEX IF NOT EXISTS idx_executions_job_started ON executions(job_id, started_at DESC)`,
@@ -146,6 +156,11 @@ func (s *SQLiteStore) migrate(ctx context.Context) error {
 	columns := []struct{ table, column, ddl string }{
 		{"executions", "executed_command", "executed_command TEXT DEFAULT ''"},
 		{"executions", "output", "output TEXT DEFAULT ''"},
+		{"executions", "main_exit_code", "main_exit_code INTEGER"},
+		{"executions", "before_exit_code", "before_exit_code INTEGER"},
+		{"executions", "before_output", "before_output TEXT DEFAULT ''"},
+		{"executions", "after_exit_code", "after_exit_code INTEGER"},
+		{"executions", "after_output", "after_output TEXT DEFAULT ''"},
 		{"jobs", "name", "name TEXT DEFAULT ''"},
 		{"jobs", "last_exit_code", "last_exit_code INTEGER"},
 		{"jobs", "last_duration", "last_duration INTEGER DEFAULT 0"},
@@ -268,9 +283,11 @@ func (s *SQLiteStore) RecordExecution(req request.RecordExecution) error {
 	defer cancel()
 
 	_, err := s.db.ExecContext(ctx, `
-		INSERT INTO executions (job_id, started_at, finished_at, status, exit_code, executed_command, output)
-		VALUES (?, ?, ?, ?, ?, ?, ?)`,
-		req.JobID, req.StartedAt, req.FinishedAt, req.Status.String(), req.ExitCode, req.ExecutedCommand, req.Output)
+		INSERT INTO executions (job_id, started_at, finished_at, status, exit_code, executed_command, output,
+			main_exit_code, before_exit_code, before_output, after_exit_code, after_output)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		req.JobID, req.StartedAt, req.FinishedAt, req.Status.String(), req.ExitCode, req.ExecutedCommand, req.Output,
+		req.MainExitCode, req.BeforeExitCode, req.BeforeOutput, req.AfterExitCode, req.AfterOutput)
 
 	if err != nil {
 		return fmt.Errorf("failed to record execution: %w", err)
@@ -286,7 +303,8 @@ func (s *SQLiteStore) GetExecutions(jobID string, limit int) ([]ExecutionInfo, e
 
 	var executions []ExecutionInfo
 	err := s.db.Select(&executions, `
-		SELECT id, job_id, started_at, finished_at, status, exit_code, executed_command, output
+		SELECT id, job_id, started_at, finished_at, status, exit_code, executed_command, output,
+		       main_exit_code, before_exit_code, before_output, after_exit_code, after_output
 		FROM executions
 		WHERE job_id = ?
 		ORDER BY started_at DESC
@@ -313,7 +331,8 @@ func (s *SQLiteStore) GetExecutionByID(execID int) (ExecutionInfo, error) {
 
 	var execution ExecutionInfo
 	err := s.db.Get(&execution, `
-		SELECT id, job_id, started_at, finished_at, status, exit_code, executed_command, output
+		SELECT id, job_id, started_at, finished_at, status, exit_code, executed_command, output,
+		       main_exit_code, before_exit_code, before_output, after_exit_code, after_output
 		FROM executions
 		WHERE id = ?`,
 		execID)
@@ -367,7 +386,8 @@ func (s *SQLiteStore) GetExecutionByStart(jobID string, start int64) (ExecutionI
 
 	var execution ExecutionInfo
 	err = s.db.Get(&execution, `
-		SELECT id, job_id, started_at, finished_at, status, exit_code, executed_command, output
+		SELECT id, job_id, started_at, finished_at, status, exit_code, executed_command, output,
+		       main_exit_code, before_exit_code, before_output, after_exit_code, after_output
 		FROM executions
 		WHERE id = ?`,
 		execID)

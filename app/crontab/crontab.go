@@ -54,6 +54,8 @@ type JobSpec struct {
 	Spec       string             `yaml:"spec,omitempty" json:"spec,omitempty" jsonschema:"description=Cron specification string"`
 	Sched      Schedule           `yaml:"sched,omitempty" json:"sched,omitempty" jsonschema:"description=Structured schedule format (alternative to spec)"` //nolint:modernize // yaml.v3 doesn't support omitzero
 	Command    string             `yaml:"command" json:"command" jsonschema:"required,description=Command to execute"`
+	Before     string             `yaml:"before,omitempty" json:"before,omitempty" jsonschema:"description=Command to execute before the job command"`
+	After      string             `yaml:"after,omitempty" json:"after,omitempty" jsonschema:"description=Command to execute after the job command"`
 	Name       string             `yaml:"name,omitempty" json:"name,omitempty" jsonschema:"description=Optional job name or description"`
 	Repeater   *RepeaterConfig    `yaml:"repeater,omitempty" json:"repeater,omitempty" jsonschema:"description=Job-specific repeater configuration"`
 	Conditions *conditions.Config `yaml:"conditions,omitempty" json:"conditions,omitempty" jsonschema:"description=Resource thresholds for conditional execution"`

@@ -67,6 +67,24 @@ func TestParser_ListYAML(t *testing.T) {
 	assert.True(t, ctab.isYAML)
 }
 
+func TestParser_ListYAMLHooks(t *testing.T) {
+	tmp, err := os.CreateTemp(t.TempDir(), "hooks*.yml")
+	require.NoError(t, err)
+	defer tmp.Close()
+	_, err = tmp.WriteString(`jobs:
+  - spec: "@daily"
+    before: /scripts/lock.sh
+    command: /scripts/backup.sh
+    after: /scripts/unlock.sh
+`)
+	require.NoError(t, err)
+
+	jobs, err := New(tmp.Name(), time.Hour, nil).List()
+	require.NoError(t, err)
+	require.Len(t, jobs, 1)
+	assert.Equal(t, JobSpec{Spec: "@daily", Before: "/scripts/lock.sh", Command: "/scripts/backup.sh", After: "/scripts/unlock.sh"}, jobs[0])
+}
+
 func TestParser_ListYAMLInvalid(t *testing.T) {
 	// test invalid YAML
 	tmp, err := os.CreateTemp("", "crontab*.yml")

@@ -46,6 +46,11 @@ func (s *Server) OnJobComplete(req request.OnJobComplete) {
 		EventType:       eventType,
 		ExitCode:        req.ExitCode,
 		Output:          req.Output,
+		MainExitCode:    req.MainExitCode,
+		BeforeExitCode:  req.BeforeExitCode,
+		BeforeOutput:    req.BeforeOutput,
+		AfterExitCode:   req.AfterExitCode,
+		AfterOutput:     req.AfterOutput,
 		StartedAt:       req.StartTime,
 		FinishedAt:      req.EndTime,
 	}
@@ -319,6 +324,11 @@ func (s *Server) recordExecutionAndCleanup(jobID string, event JobEvent, status 
 		ExitCode:        event.ExitCode,
 		ExecutedCommand: event.ExecutedCommand,
 		Output:          output,
+		MainExitCode:    event.MainExitCode,
+		BeforeExitCode:  event.BeforeExitCode,
+		BeforeOutput:    event.BeforeOutput,
+		AfterExitCode:   event.AfterExitCode,
+		AfterOutput:     event.AfterOutput,
 	}); err != nil {
 		log.Printf("[WARN] failed to save execution: %v", err)
 	}

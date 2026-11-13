@@ -249,6 +249,7 @@ The YAML format supports:
   - `spec`: Traditional cron string or @-descriptors
   - `sched`: Structured format with separate fields (minute, hour, day, month, weekday)
 - Optional `name` field for job description
+- Optional `before` and `after` commands for setup and cleanup hooks
 - Optional `repeater` field for job-specific retry configuration
 - Optional `conditions` field for conditional execution based on system resources
 - JSON Schema validation for configuration correctness
@@ -288,20 +289,17 @@ jobs:
       check_interval: 5m      # Check every 5 minutes
 ```
 
-Example with steps around the main command. Cronn runs each command with `sh -c`, so a multi-line command can run setup and cleanup steps around the main one:
+Example with setup and cleanup hooks:
 ```yaml
 jobs:
   - spec: "0 0 * * *"
     name: "Locked backup"
-    command: |
-      /scripts/lock.sh || exit $?
-      /scripts/backup.sh; rc=$?
-      /scripts/unlock.sh; after_rc=$?
-      [ "$rc" -ne 0 ] || rc=$after_rc
-      exit "$rc"
+    before: "/scripts/lock.sh"
+    command: "/scripts/backup.sh"
+    after: "/scripts/unlock.sh"
 ```
 
-If `lock.sh` fails, nothing else runs and the job fails with its exit code. If `backup.sh` fails, `unlock.sh` still runs and the job reports the backup's exit code. If only `unlock.sh` fails, the job fails with the unlock's exit code. The job still records one exit code and one combined output, and retries and auto-resume re-run the whole command.
+If `before` fails, the main command and `after` are skipped. Once the main command starts, `after` runs whether it succeeds or fails. Retries apply to the main command; `before` runs once and `after` runs after the final attempt. The job history and inspector show each step's exit code and captured output separately. Auto-resume repeats the full sequence.
 
 Both formats support the same template variables.
 
