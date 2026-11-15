@@ -1,8 +1,8 @@
-project_name: cronn
+project_name: cronx
 dist: .bin
 builds:
-  - id: cronn
-    binary: "cronn"
+  - id: cronx
+    binary: "cronx"
     env:
       - CGO_ENABLED=0
     goos:
@@ -26,7 +26,7 @@ builds:
     ldflags: "-s -w -X main.revision={{.Tag}}-{{.ShortCommit}}-{{.CommitDate}}"
 
 archives:
-  - id: cronn
+  - id: cronx
     name_template: >-
       {{.ProjectName}}_
       {{- .Tag}}_
@@ -44,53 +44,3 @@ archives:
       - README.md
       - completions/*
     rlcp: true
-
-brews:
-  - name: cronn
-    tap:
-      owner: umputun
-      name: homebrew-apps
-      branch: master
-    directory: Formula
-    commit_author:
-      name: umputun
-      email: umputun@gmail.com
-    commit_msg_template: "Brew formula update for {{ .ProjectName }} version {{ .Tag }}"
-    homepage: "https://cronn.umputun.dev"
-    description: "Cronn is a crontab jobs scheduler with some nice extras. It allows to run commands on specified time intervals and can be used directly as well as from a container."
-    license: "MIT"
-    extra_install: |
-      bash_completion.install "completions/cronn.bash" => "cronn"
-      zsh_completion.install "completions/cronn.zsh" => "_cronn"
-      fish_completion.install "completions/cronn.fish" => "cronn.fish"
-
-nfpms:
-  - id: cronn
-    package_name: cronn
-    file_name_template: "{{.ProjectName}}_{{.Tag}}_{{.Os}}_{{.Arch}}"
-    vendor: Umputun
-    homepage: https://github.com/umputun/cronn
-    maintainer: Umputun <umputun@gmail.com>
-    description: cron replacement with extras
-    license: MIT
-    formats:
-      - deb
-      - rpm
-      - apk
-    bindir: /usr/bin
-    epoch: 1
-    release: 1
-    contents:
-      - src: cronn.service
-        dst: /etc/systemd/system/cronn.service
-      - src: crontab.example
-        dst: /etc/cronntab
-      - src: completions/cronn.bash
-        dst: /usr/share/bash-completion/completions/cronn
-      - src: completions/cronn.zsh
-        dst: /usr/share/zsh/vendor-completions/_cronn
-      - src: completions/cronn.fish
-        dst: /usr/share/fish/vendor_completions.d/cronn.fish
-    scripts:
-      postinstall: "scripts/postinstall.sh"
-      preremove: "scripts/preremove.sh"
