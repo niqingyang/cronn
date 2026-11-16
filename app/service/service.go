@@ -257,77 +257,21 @@ func (s *Scheduler) runJobWithCommand(ctx context.Context, r crontab.JobSpec, co
 		s.JobEventHandler.OnJobStart(start)
 	}
 
-	var notifyOutput string
-	var mainExitCode, beforeExitCode, afterExitCode *int
-	var beforeOutput, mainOutput, afterOutput string
+	var execution commandExecution
 	if beforeCmd == "" && afterCmd == "" {
-		notifyOutput, err = s.executeCommand(ctx, cmd, s.Stdout, rptr, webCapture)
+		execution.notifyOutput, execution.err = s.executeCommand(ctx, cmd, s.Stdout, rptr, webCapture)
 	} else {
-		runStep := func(stepCtx context.Context, command string, stepRepeater Repeater) (string, string, error) {
-			stepCapture := s.newWebCapture()
-			writers := make([]io.Writer, 0, 2)
-			if s.Stdout != nil {
-				writers = append(writers, s.Stdout)
-			}
-			if webCapture != nil {
-				writers = append(writers, webCapture)
-			}
-			var logWriter io.Writer = io.Discard
-			if len(writers) == 1 {
-				logWriter = writers[0]
-			} else if len(writers) > 1 {
-				logWriter = io.MultiWriter(writers...)
-			}
-			stepNotify, stepErr := s.executeCommand(stepCtx, command, logWriter, stepRepeater, stepCapture)
-			stepOutput := ""
-			if stepCapture != nil {
-				stepOutput = stepCapture.GetOutput()
-			}
-			return stepNotify, stepOutput, stepErr
-		}
-
-		var notifyParts []string
-		var beforeErr, mainErr, afterErr error
-		if beforeCmd != "" {
-			stepNotify, stepOutput, stepErr := runStep(ctx, beforeCmd, repeater.New(&strategy.Once{}))
-			beforeOutput, beforeErr = stepOutput, stepErr
-			beforeExitCode = intPointer(commandExitCode(stepErr))
-			if stepNotify != "" {
-				notifyParts = append(notifyParts, "[before]\n"+stepNotify)
-			}
-		}
-
-		if beforeErr == nil {
-			stepNotify, stepOutput, stepErr := runStep(ctx, cmd, rptr)
-			mainOutput, mainErr = stepOutput, stepErr
-			mainExitCode = intPointer(commandExitCode(stepErr))
-			if stepNotify != "" {
-				notifyParts = append(notifyParts, "[command]\n"+stepNotify)
-			}
-			if afterCmd != "" {
-				stepNotify, stepOutput, stepErr = runStep(context.WithoutCancel(ctx), afterCmd, repeater.New(&strategy.Once{}))
-				afterOutput, afterErr = stepOutput, stepErr
-				afterExitCode = intPointer(commandExitCode(stepErr))
-				if stepNotify != "" {
-					notifyParts = append(notifyParts, "[after]\n"+stepNotify)
-				}
-			}
-			err = mainErr
-			if err == nil {
-				err = afterErr
-			}
-		} else {
-			err = beforeErr
-		}
-		notifyOutput = strings.Join(notifyParts, "\n\n")
+		execution = s.executeWithHooks(ctx, cmd, beforeCmd, afterCmd, rptr, webCapture)
 	}
+	notifyOutput := execution.notifyOutput
+	err = execution.err
 	webOutput := ""
 	if webCapture != nil {
 		webOutput = webCapture.GetOutput()
 	}
 	executionOutput := webOutput
 	if beforeCmd != "" || afterCmd != "" {
-		executionOutput = mainOutput
+		executionOutput = execution.mainOutput
 	}
 
 	// notify job complete
@@ -342,11 +286,11 @@ func (s *Scheduler) runJobWithCommand(ctx context.Context, r crontab.JobSpec, co
 			EndTime:         endTime,
 			ExitCode:        exitCode,
 			Output:          executionOutput,
-			MainExitCode:    mainExitCode,
-			BeforeExitCode:  beforeExitCode,
-			BeforeOutput:    beforeOutput,
-			AfterExitCode:   afterExitCode,
-			AfterOutput:     afterOutput,
+			MainExitCode:    execution.mainExitCode,
+			BeforeExitCode:  execution.beforeExitCode,
+			BeforeOutput:    execution.beforeOutput,
+			AfterExitCode:   execution.afterExitCode,
+			AfterOutput:     execution.afterOutput,
 			Err:             err,
 		})
 	}
@@ -375,6 +319,76 @@ func (s *Scheduler) runJobWithCommand(ctx context.Context, r crontab.JobSpec, co
 	}
 
 	return nil
+}
+
+type commandExecution struct {
+	notifyOutput   string
+	err            error
+	mainExitCode   *int
+	beforeExitCode *int
+	afterExitCode  *int
+	beforeOutput   string
+	mainOutput     string
+	afterOutput    string
+}
+
+func (s *Scheduler) executeWithHooks(ctx context.Context, command, beforeCmd, afterCmd string, rptr Repeater, webCapture *OutputCapture) commandExecution {
+	runStep := func(stepCtx context.Context, stepCommand string, stepRepeater Repeater) (string, string, error) {
+		stepCapture := s.newWebCapture()
+		writers := make([]io.Writer, 0, 2)
+		if s.Stdout != nil {
+			writers = append(writers, s.Stdout)
+		}
+		if webCapture != nil {
+			writers = append(writers, webCapture)
+		}
+		logWriter := io.Discard
+		if len(writers) == 1 {
+			logWriter = writers[0]
+		} else if len(writers) > 1 {
+			logWriter = io.MultiWriter(writers...)
+		}
+		stepNotify, stepErr := s.executeCommand(stepCtx, stepCommand, logWriter, stepRepeater, stepCapture)
+		stepOutput := ""
+		if stepCapture != nil {
+			stepOutput = stepCapture.GetOutput()
+		}
+		return stepNotify, stepOutput, stepErr
+	}
+
+	var result commandExecution
+	var notifyParts []string
+	var beforeErr error
+	if beforeCmd != "" {
+		stepNotify, stepOutput, stepErr := runStep(ctx, beforeCmd, repeater.New(&strategy.Once{}))
+		result.beforeOutput, beforeErr = stepOutput, stepErr
+		result.beforeExitCode = new(commandExitCode(stepErr))
+		notifyParts = appendNotification(notifyParts, "before", stepNotify)
+	}
+	if beforeErr != nil {
+		result.err = beforeErr
+		result.notifyOutput = strings.Join(notifyParts, "\n\n")
+		return result
+	}
+
+	stepNotify, stepOutput, mainErr := runStep(ctx, command, rptr)
+	result.mainOutput = stepOutput
+	result.mainExitCode = new(commandExitCode(mainErr))
+	notifyParts = appendNotification(notifyParts, "command", stepNotify)
+
+	var afterErr error
+	if afterCmd != "" {
+		stepNotify, stepOutput, afterErr = runStep(context.WithoutCancel(ctx), afterCmd, repeater.New(&strategy.Once{}))
+		result.afterOutput = stepOutput
+		result.afterExitCode = new(commandExitCode(afterErr))
+		notifyParts = appendNotification(notifyParts, "after", stepNotify)
+	}
+	result.err = mainErr
+	if result.err == nil {
+		result.err = afterErr
+	}
+	result.notifyOutput = strings.Join(notifyParts, "\n\n")
+	return result
 }
 
 // jobFuncWithEditedCommand creates job function with edited command for manual execution
@@ -630,8 +644,11 @@ func (s *Scheduler) jobIDFromCommand(cmd string) string {
 	return hex.EncodeToString(h[:])
 }
 
-func intPointer(value int) *int {
-	return &value
+func appendNotification(parts []string, name, output string) []string {
+	if output == "" {
+		return parts
+	}
+	return append(parts, "["+name+"]\n"+output)
 }
 
 func commandExitCode(err error) int {
