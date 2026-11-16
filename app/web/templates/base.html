@@ -6,8 +6,8 @@
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <!-- swapped content gets its htmx handlers in the settle step; a delay leaves polled buttons dead for it -->
     <meta name="htmx-config" content='{"defaultSettleDelay":0}'>
-    <title>Cronx Dashboard</title>
-    <meta name="description" content="Monitor and manage cron jobs with Cronx">
+    <title>Cronn Dashboard</title>
+    <meta name="description" content="Monitor and manage cron jobs with Cronn">
     <link rel="stylesheet" href="{{url "/static/style.css"}}">
     <link rel="icon" href="{{url "/static/favicon.svg"}}" type="image/svg+xml">
 </head>
@@ -19,7 +19,7 @@
                     <circle cx="12" cy="12" r="9.5" stroke="currentColor" stroke-width="2"/>
                     <path d="M12 7v5l3.5 2" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>
                 </svg>
-                <span class="bt">cronx</span>
+                <span class="bt">cronn</span>
             </div>
             {{if .Hostname}}
             {{if .NeighborsEnabled}}
@@ -71,7 +71,7 @@
             <span title="{{.FullVersion}}">{{.Version}}</span>
             {{end}}
             <span class="separator">•</span>
-            <a href="https://github.com/niqingyang/cronn" class="footer-link" data-hx-boost="false">GitHub</a>
+            <a href="https://github.com/umputun/cronn" class="footer-link" data-hx-boost="false">GitHub</a>
             {{if .AuthEnabled}}
             <span class="separator">•</span>
             <a href="{{url "/logout"}}" class="footer-link" data-hx-boost="false">Logout</a>
